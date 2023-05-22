@@ -32,6 +32,7 @@
 ]).
 -endif.
 
+%% TODO: what
 -define(PD_QDROP, pd_queue_drop).
 
 -callback init(Args :: any()) ->
@@ -115,6 +116,7 @@
 
 -define(MQTT_PROTO_MAJOR, 3).
 
+%% TODO: update record to use replayq
 -record(queue, {
     queue = queue:new() :: queue:queue(),
     %% max queue size. 0 means disabled.
@@ -270,12 +272,14 @@ connecting(connect, State) ->
 connecting(disconnect, State) ->
     {stop, normal, State};
 connecting({publish, PubReq}, State) ->
+    %% TODO
     NewState = maybe_queue_outgoing(PubReq, State),
     {next_state, connecting, NewState};
 connecting(_Event, State) ->
     {next_state, connecting, State}.
 
 waiting_for_connack({publish, PubReq}, State) ->
+    %% TODO
     NewState = maybe_queue_outgoing(PubReq, State),
     {next_state, waiting_for_connack, NewState};
 waiting_for_connack(_Event, State) ->
@@ -331,6 +335,7 @@ connected(
                 info_fun = NewInfoFun
             }
         )};
+%% TODO
 connected({publish, PubReq}, #state{o_queue = #queue{size = Size} = _Q} = State) when Size > 0 ->
     NewState = maybe_queue_outgoing(PubReq, State),
     {next_state, connected, NewState};
@@ -338,6 +343,7 @@ connected({publish, PubReq}, State) ->
     {next_state, connected, send_publish(PubReq, State)};
 connected({publish_from_queue, PubReq}, State) ->
     State1 = send_publish(PubReq, State),
+    %% TODO
     {next_state, connected, maybe_publish_offline_msgs(State1)};
 connected({retry, Key}, State) ->
     {next_state, connected, handle_retry(Key, State)};
@@ -380,6 +386,7 @@ init([Mod, Args, Opts]) ->
     RetryInterval = proplists:get_value(retry_interval, Opts, 10),
     ProtoVer = proplists:get_value(proto_version, Opts, ?MQTT_PROTO_MAJOR),
     InfoFun = proplists:get_value(info_fun, Opts, {fun(_, _) -> ok end, []}),
+    %% TODO: max queue size
     MaxQueueSize = proplists:get_value(max_queue_size, Opts, 0),
     {Transport, TransportOpts} = proplists:get_value(transport, Opts, {gen_tcp, []}),
     State = #state{
@@ -402,6 +409,7 @@ init([Mod, Args, Opts]) ->
         keepalive_interval = 1000 * KeepAliveInterval,
         retry_interval = 1000 * RetryInterval,
         transport = {Transport, TransportOpts},
+        %% TODO: max queue size
         o_queue = #queue{max = MaxQueueSize},
         info_fun = InfoFun
     },
@@ -461,6 +469,7 @@ handle_frame(waiting_for_connack, #mqtt_connack{return_code = ReturnCode}, State
         ?CONNACK_ACCEPT ->
             NewInfoFun = call_info_fun({connack_in, ClientId}, InfoFun),
             State1 = resume_wacks_retry(State0),
+            %% TODO: offline msgs?
             State2 = maybe_publish_offline_msgs(State1),
             wrap_res(
                 connected, on_connect, [], start_ping_timer(State2#state{info_fun = NewInfoFun})
@@ -624,6 +633,7 @@ handle_frame(connected, #mqtt_disconnect{}, #state{transport = {Transport, _}} =
 handle_event(Event, StateName, State) ->
     wrap_res(StateName, handle_cast, [Event], State).
 
+%% TODO: queue information
 handle_sync_event(
     info,
     _From,
@@ -768,6 +778,7 @@ maybe_reconnect(
             )
     end.
 
+%% TODO: queing logic
 maybe_queue_outgoing(_PubReq, #state{o_queue = #queue{max = 0}} = State) ->
     %% queue is disabled
     State;
@@ -779,19 +790,23 @@ maybe_queue_outgoing(_PubReq, #state{o_queue = Q} = State) ->
     %% drop!
     State#state{o_queue = drop(Q)}.
 
+%% TODO: append to queue
 queue_outgoing(Msg, #queue{size = Size, queue = QQ} = Q) ->
     Q#queue{size = Size + 1, queue = queue:in(Msg, QQ)}.
 
+%% TODO: publish from queue logic
 maybe_publish_offline_msgs(#state{o_queue = #queue{size = Size} = Q} = State) when Size > 0 ->
     publish_from_queue(Q, State);
 maybe_publish_offline_msgs(State) ->
     State.
 
+%% TODO: pop from queue then publish
 publish_from_queue(#queue{size = Size, queue = QQ} = Q, State0) when Size > 0 ->
     {{value, PubReq}, NewQQ} = queue:out(QQ),
-    gen_fsm:send_event(self(), {publish_from_queue, PubReq}),
+    gen_fsm:send_event(self(), {publish_from_queue, PubReq}), %% TODO: take a closer look
     State0#state{o_queue = Q#queue{size = Size - 1, queue = NewQQ}}.
 
+%% TODO: drop only increments metrics 
 drop(#queue{drop = D} = Q) ->
     put(?PD_QDROP, D + 1),
     Q#queue{drop = D + 1}.
