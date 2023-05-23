@@ -115,10 +115,12 @@
 ]).
 
 -define(MQTT_PROTO_MAJOR, 3).
+-define(DIR, "./replayq-data").
 
 %% TODO: update record to use replayq
 -record(queue, {
-    queue = queue:new() :: queue:queue(),
+    queue :: replayq:q(),
+    config :: replayq:config(),
     %% max queue size. 0 means disabled.
     max = 0 :: non_neg_integer(),
     size = 0 :: non_neg_integer(),
@@ -389,6 +391,14 @@ init([Mod, Args, Opts]) ->
     %% TODO: max queue size
     MaxQueueSize = proplists:get_value(max_queue_size, Opts, 0),
     {Transport, TransportOpts} = proplists:get_value(transport, Opts, {gen_tcp, []}),
+    %% TODO: replayq DIR should be read from config
+    RqConfig = #{dir => ?DIR, seg_bytes => 800,
+        sizer => fun(K) -> byte_size(term_to_binary(K)) end,
+        marshaller => fun(K) when not is_binary(K) -> term_to_binary(K);
+                        (Bin)-> binary_to_term(Bin)
+                    end
+    },
+    RQ = replayq:open(RqConfig),
     State = #state{
         host = Host,
         port = Port,
@@ -409,8 +419,7 @@ init([Mod, Args, Opts]) ->
         keepalive_interval = 1000 * KeepAliveInterval,
         retry_interval = 1000 * RetryInterval,
         transport = {Transport, TransportOpts},
-        %% TODO: max queue size
-        o_queue = #queue{max = MaxQueueSize},
+        o_queue = #queue{max = MaxQueueSize, config = RqConfig, queue = RQ, size = replayq:count(RQ)},
         info_fun = InfoFun
     },
     Res = wrap_res(connecting, init, [Args], State),
@@ -464,7 +473,7 @@ process_bytes(Bytes, StateName, #state{parser = ParserState} = State) ->
     end.
 
 handle_frame(waiting_for_connack, #mqtt_connack{return_code = ReturnCode}, State0) ->
-    #state{client = ClientId, info_fun = InfoFun} = State0,
+    #state{host = Host, port = Port, client = ClientId, info_fun = InfoFun} = State0,
     case ReturnCode of
         ?CONNACK_ACCEPT ->
             NewInfoFun = call_info_fun({connack_in, ClientId}, InfoFun),
@@ -662,7 +671,8 @@ handle_sync_event({get_metrics, CR}, _From, StateName, State) ->
 handle_sync_event(Req, From, StateName, State) ->
     wrap_res(StateName, handle_call, [Req, From], State).
 
-terminate(Reason, StateName, State) ->
+terminate(Reason, StateName, #state{o_queue = #queue{queue = QQ} = _} = State) ->
+    ok = replayq:close(QQ),
     wrap_res(StateName, terminate, [Reason], State).
 
 code_change(OldVsn, StateName, State, Extra) ->
@@ -791,8 +801,10 @@ maybe_queue_outgoing(_PubReq, #state{o_queue = Q} = State) ->
     State#state{o_queue = drop(Q)}.
 
 %% TODO: append to queue
-queue_outgoing(Msg, #queue{size = Size, queue = QQ} = Q) ->
-    Q#queue{size = Size + 1, queue = queue:in(Msg, QQ)}.
+queue_outgoing(Msg, #queue{queue = QQ} = Q) ->
+    lager:info("Queue MSG: ~p\n", [Msg]),
+    NewQQ = replayq:append(QQ, [Msg]),
+    Q#queue{size = replayq:count(NewQQ), queue = NewQQ}.
 
 %% TODO: publish from queue logic
 maybe_publish_offline_msgs(#state{o_queue = #queue{size = Size} = Q} = State) when Size > 0 ->
@@ -802,9 +814,11 @@ maybe_publish_offline_msgs(State) ->
 
 %% TODO: pop from queue then publish
 publish_from_queue(#queue{size = Size, queue = QQ} = Q, State0) when Size > 0 ->
-    {{value, PubReq}, NewQQ} = queue:out(QQ),
+    {NewQQ, AckRef, [PubReq]} = replayq:pop(QQ, #{count_limit => 1}),
+    ok = replayq:ack(NewQQ, AckRef),    %% TODO: maybe dont ack immediately
+    lager:info("Pop from Queue MSG: ~p\n", [PubReq]),
     gen_fsm:send_event(self(), {publish_from_queue, PubReq}), %% TODO: take a closer look
-    State0#state{o_queue = Q#queue{size = Size - 1, queue = NewQQ}}.
+    State0#state{o_queue = Q#queue{size = replayq:count(NewQQ), queue = NewQQ}}.
 
 %% TODO: drop only increments metrics 
 drop(#queue{drop = D} = Q) ->
