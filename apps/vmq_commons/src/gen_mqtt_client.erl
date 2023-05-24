@@ -796,13 +796,14 @@ maybe_queue_outgoing(PubReq, #state{o_queue = #queue{size = Size, max = Max} = Q
     Size < Max
 ->
     State#state{o_queue = queue_outgoing(PubReq, Q)};
-maybe_queue_outgoing(_PubReq, #state{o_queue = Q} = State) ->
+maybe_queue_outgoing(PubReq, #state{o_queue = Q} = State) ->
     %% drop!
+    lager:debug("Drop from Queue MSG: ~p\n", [trunc_pubreq(PubReq)]),
     State#state{o_queue = drop(Q)}.
 
 %% TODO: append to queue
 queue_outgoing(Msg, #queue{queue = QQ} = Q) ->
-    lager:info("Queue MSG: ~p\n", [Msg]),
+    lager:debug("Add to Queue MSG: ~p\n", [trunc_pubreq(Msg)]),
     NewQQ = replayq:append(QQ, [Msg]),
     Q#queue{size = replayq:count(NewQQ), queue = NewQQ}.
 
@@ -816,8 +817,8 @@ maybe_publish_offline_msgs(State) ->
 publish_from_queue(#queue{size = Size, queue = QQ} = Q, State0) when Size > 0 ->
     {NewQQ, AckRef, [PubReq]} = replayq:pop(QQ, #{count_limit => 1}),
     ok = replayq:ack(NewQQ, AckRef),    %% TODO: maybe dont ack immediately
-    lager:info("Pop from Queue MSG: ~p\n", [PubReq]),
-    gen_fsm:send_event(self(), {publish_from_queue, PubReq}), %% TODO: take a closer look
+    lager:debug("Publish from Queue MSG: ~p\n", [trunc_pubreq(PubReq)]),
+    gen_fsm:send_event(self(), {publish_from_queue, PubReq}),
     State0#state{o_queue = Q#queue{size = replayq:count(NewQQ), queue = NewQQ}}.
 
 %% TODO: drop only increments metrics 
@@ -912,6 +913,13 @@ get_remove_unacked_msg(MessageId, #state{unacked_msgs = UnackedMsgs} = State) ->
         _ ->
             error
     end.
+
+%% truncate cutoff: 80 characters
+trunc_pubreq({_, Payload, _, _, _} = PubReq) when size(Payload) =< 80 ->
+    PubReq;
+trunc_pubreq({T, Payload, Q, R, D}) ->
+    P1 = string:substr(binary_to_list(Payload), 1, 80) ++ "...(truncated)",
+    {T, list_to_binary(P1), Q, R, D}.
 
 '++'(65535) -> 1;
 '++'(N) -> N + 1.
