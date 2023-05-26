@@ -393,6 +393,7 @@ init([Mod, Args, Opts]) ->
     {Transport, TransportOpts} = proplists:get_value(transport, Opts, {gen_tcp, []}),
     %% TODO: replayq DIR should be read from config
     RqConfig = #{dir => ?DIR, seg_bytes => 800,
+        offload => true,
         sizer => fun(K) -> byte_size(term_to_binary(K)) end,
         marshaller => fun(K) when not is_binary(K) -> term_to_binary(K);
                         (Bin)-> binary_to_term(Bin)
@@ -473,7 +474,7 @@ process_bytes(Bytes, StateName, #state{parser = ParserState} = State) ->
     end.
 
 handle_frame(waiting_for_connack, #mqtt_connack{return_code = ReturnCode}, State0) ->
-    #state{host = Host, port = Port, client = ClientId, info_fun = InfoFun} = State0,
+    #state{client = ClientId, info_fun = InfoFun} = State0,
     case ReturnCode of
         ?CONNACK_ACCEPT ->
             NewInfoFun = call_info_fun({connack_in, ClientId}, InfoFun),
