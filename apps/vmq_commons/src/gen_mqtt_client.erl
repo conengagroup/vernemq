@@ -816,11 +816,18 @@ maybe_publish_offline_msgs(State) ->
 
 %% TODO: pop from queue then publish
 publish_from_queue(#queue{size = Size, queue = QQ} = Q, State0) when Size > 0 ->
-    {NewQQ, AckRef, [PubReq]} = replayq:pop(QQ, #{count_limit => 1}),
+    {NewQQ, AckRef, PubReqL} = replayq:pop(QQ, #{count_limit => 5}),
+    lager:debug("AckRef: ~p\n", [AckRef]),
     ok = replayq:ack(NewQQ, AckRef),    %% TODO: maybe dont ack immediately
-    lager:debug("Publish from Queue MSG: ~p\n", [trunc_pubreq(PubReq)]),
-    gen_fsm:send_event(self(), {publish_from_queue, PubReq}),
+    foreach_pubreq(PubReqL),
     State0#state{o_queue = Q#queue{size = replayq:count(NewQQ), queue = NewQQ}}.
+
+foreach_pubreq([H|T]) ->
+    lager:debug("Publish from Queue MSG: ~p\n", [trunc_pubreq(H)]),
+    gen_fsm:send_event(self(), {publish_from_queue, H}),
+    foreach_pubreq(T);
+foreach_pubreq([]) ->
+    true.
 
 %% TODO: drop only increments metrics 
 drop(#queue{drop = D} = Q) ->
