@@ -121,6 +121,8 @@
 -record(queue, {
     queue :: replayq:q(),
     config :: replayq:config(),
+    out_waiting = 0 :: non_neg_integer(),
+    out_next_ack,
     %% max queue size. 0 means disabled.
     max = 0 :: non_neg_integer(),
     size = 0 :: non_neg_integer(),
@@ -536,6 +538,21 @@ handle_frame(connected, #mqtt_unsuback{message_id = MsgId}, State0) ->
         {error, not_found} ->
             {next_state, connected, State0}
     end;
+handle_frame(connected, #mqtt_puback{message_id = MessageId}, 
+    #state{info_fun = InfoFun, o_queue = #queue{out_waiting = Waiting, out_next_ack = NextAck, queue = QQ} = Q} = State0) when Waiting > 0 ->
+    %% qos1 flow
+    Key = {publish, MessageId},
+    case cancel_retry_and_get(Key, State0) of
+        {ok, {#mqtt_publish{}, State1}} ->
+            NewWaiting = maybe_ack_msgs(QQ, NextAck, Waiting),
+            NewQ = Q#queue{out_waiting = NewWaiting, size = replayq:count(QQ)},
+            lager:debug("Ack Msg ~p | NextAck: ~p | NewWaiting: ~p", [MessageId, NextAck, NewWaiting]),
+            NewInfoFun = call_info_fun({puback_in, MessageId}, InfoFun),
+            State2 = maybe_publish_offline_msgs(State1#state{info_fun = NewInfoFun, o_queue = NewQ}),
+            {next_state, connected, State2};
+        {error, not_found} ->
+            {next_state, connected, State0}
+    end;
 handle_frame(connected, #mqtt_puback{message_id = MessageId}, State0) ->
     #state{info_fun = InfoFun} = State0,
     %% qos1 flow
@@ -577,6 +594,21 @@ handle_frame(connected, #mqtt_pubrel{message_id = MessageId}, State0) ->
             send_frame(Transport, Socket, PubCompFrame),
             {next_state, connected, State2#state{info_fun = NewInfoFun1}};
         error ->
+            {next_state, connected, State0}
+    end;
+handle_frame(connected, #mqtt_pubcomp{message_id = MessageId},
+    #state{info_fun = InfoFun, o_queue = #queue{out_waiting = Waiting, out_next_ack = NextAck, queue = QQ} = Q} = State0) when Waiting > 0 ->
+    %% qos2 flow
+    Key = {pubrel, MessageId},
+    case cancel_retry_and_get(Key, State0) of
+        {ok, {#mqtt_pubrel{}, State1}} ->
+            NewWaiting = maybe_ack_msgs(QQ, NextAck, Waiting),
+            NewQ = Q#queue{out_waiting = NewWaiting, size = replayq:count(QQ)},
+            lager:debug("Ack Msg ~p | NextAck: ~p | NewWaiting: ~p", [MessageId, NextAck, NewWaiting]),
+            NewInfoFun = call_info_fun({pubcomp_in, MessageId}, InfoFun),
+            State2 = maybe_publish_offline_msgs(State1#state{info_fun = NewInfoFun, o_queue = NewQ}),
+            {next_state, connected, State2};
+        {error, not_found} ->
             {next_state, connected, State0}
     end;
 handle_frame(connected, #mqtt_pubcomp{message_id = MessageId}, State0) ->
@@ -809,18 +841,27 @@ queue_outgoing(Msg, #queue{queue = QQ} = Q) ->
     Q#queue{size = replayq:count(NewQQ), queue = NewQQ}.
 
 %% TODO: publish from queue logic
-maybe_publish_offline_msgs(#state{o_queue = #queue{size = Size} = Q} = State) when Size > 0 ->
+maybe_publish_offline_msgs(#state{o_queue = #queue{size = Size, out_waiting = Waiting} = Q} = State) when Size > 0 , Waiting < 1 ->
     publish_from_queue(Q, State);
 maybe_publish_offline_msgs(State) ->
     State.
 
+maybe_ack_msgs(_, _, Waiting) when Waiting == 0 ->
+    0;
+maybe_ack_msgs(Queue, AckRef, Waiting) when Waiting == 1 ->
+    ok = replayq:ack(Queue, AckRef),
+    lager:debug("Sent Ack: ~p", [AckRef]),
+    0;
+maybe_ack_msgs(_, _, Waiting) ->
+    Waiting - 1.
+
 %% TODO: pop from queue then publish
 publish_from_queue(#queue{size = Size, queue = QQ} = Q, State0) when Size > 0 ->
-    {NewQQ, AckRef, PubReqL} = replayq:pop(QQ, #{count_limit => 5}),
-    lager:debug("AckRef: ~p\n", [AckRef]),
-    ok = replayq:ack(NewQQ, AckRef),    %% TODO: maybe dont ack immediately
+    {NewQQ, AckRef, PubReqL} = replayq:pop(QQ, #{count_limit => 7}),
+    BatchSize = length(PubReqL),
+    lager:debug("AckRef: ~p | Batch Size: ~p", [AckRef, BatchSize]),
     foreach_pubreq(PubReqL),
-    State0#state{o_queue = Q#queue{size = replayq:count(NewQQ), queue = NewQQ}}.
+    State0#state{o_queue = Q#queue{queue = NewQQ, size = replayq:count(NewQQ), out_next_ack = AckRef, out_waiting = BatchSize}}.
 
 foreach_pubreq([H|T]) ->
     lager:debug("Publish from Queue MSG: ~p\n", [trunc_pubreq(H)]),
