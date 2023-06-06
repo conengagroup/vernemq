@@ -395,7 +395,6 @@ init([Mod, Args, Opts]) ->
     {Transport, TransportOpts} = proplists:get_value(transport, Opts, {gen_tcp, []}),
     %% TODO: replayq DIR should be read from config
     RqConfig = #{dir => ?DIR, seg_bytes => 800,
-        offload => true,
         sizer => fun(K) -> byte_size(term_to_binary(K)) end,
         marshaller => fun(K) when not is_binary(K) -> term_to_binary(K);
                         (Bin)-> binary_to_term(Bin)
