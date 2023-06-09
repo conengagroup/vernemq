@@ -856,18 +856,17 @@ maybe_ack_msgs(_, _, Waiting) ->
 
 %% TODO: pop from queue then publish
 publish_from_queue(#queue{size = Size, queue = QQ} = Q, State0) when Size > 0 ->
-    {NewQQ, AckRef, PubReqL} = replayq:pop(QQ, #{count_limit => 7}),
-    BatchSize = length(PubReqL),
-    lager:debug("AckRef: ~p | Batch Size: ~p", [AckRef, BatchSize]),
-    foreach_pubreq(PubReqL),
-    State0#state{o_queue = Q#queue{queue = NewQQ, size = replayq:count(NewQQ), out_next_ack = AckRef, out_waiting = BatchSize}}.
+    lager:debug("READING BATCH"),
+    NewQQ = foreach_pop(QQ, 7),
+    State0#state{o_queue = Q#queue{queue = QQ, size = replayq:count(QQ)}}.
 
-foreach_pubreq([H|T]) ->
-    lager:debug("Publish from Queue MSG: ~p\n", [trunc_pubreq(H)]),
-    gen_fsm:send_event(self(), {publish_from_queue, H}),
-    foreach_pubreq(T);
-foreach_pubreq([]) ->
-    true.
+foreach_pop(Queue, Count) when Count > 0 ->
+    {NewQ, AckRef, [Elem]} = replayq:pop(Queue, #{count_limit => 1}),
+    lager:debug("AckRef: ~p | Element: ~p", [AckRef, trunc_pubreq(Elem)]),
+    gen_fsm:send_event(self(), {publish_from_queue, Elem}),
+    foreach_pop(NewQ, Count - 1);
+foreach_pop(Queue, _) ->
+    Queue.
 
 %% TODO: drop only increments metrics 
 drop(#queue{drop = D} = Q) ->
