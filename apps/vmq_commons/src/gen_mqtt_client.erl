@@ -122,7 +122,7 @@
     queue :: replayq:q(),
     config :: replayq:config(),
     out_waiting = 0 :: non_neg_integer(),
-    out_next_ack,
+    msg_ack_map,
     %% max queue size. 0 means disabled.
     max = 0 :: non_neg_integer(),
     size = 0 :: non_neg_integer(),
@@ -538,11 +538,13 @@ handle_frame(connected, #mqtt_unsuback{message_id = MsgId}, State0) ->
             {next_state, connected, State0}
     end;
 handle_frame(connected, #mqtt_puback{message_id = MessageId}, 
-    #state{info_fun = InfoFun, o_queue = #queue{out_waiting = Waiting, out_next_ack = NextAck, queue = QQ} = Q} = State0) when Waiting > 0 ->
+    #state{info_fun = InfoFun, o_queue = #queue{out_waiting = Waiting, msg_ack_map = AckMap, queue = QQ} = Q} = State0) when Waiting > 0 ->
     %% qos1 flow
     Key = {publish, MessageId},
+    lager:debug("Puback arrived: ~p", [Key]),
     case cancel_retry_and_get(Key, State0) of
         {ok, {#mqtt_publish{}, State1}} ->
+            NextAck = maps:get(MessageId, AckMap),
             NewWaiting = maybe_ack_msgs(QQ, NextAck, Waiting),
             NewQ = Q#queue{out_waiting = NewWaiting, size = replayq:count(QQ)},
             lager:debug("Ack Msg ~p | NextAck: ~p | NewWaiting: ~p", [MessageId, NextAck, NewWaiting]),
@@ -596,11 +598,13 @@ handle_frame(connected, #mqtt_pubrel{message_id = MessageId}, State0) ->
             {next_state, connected, State0}
     end;
 handle_frame(connected, #mqtt_pubcomp{message_id = MessageId},
-    #state{info_fun = InfoFun, o_queue = #queue{out_waiting = Waiting, out_next_ack = NextAck, queue = QQ} = Q} = State0) when Waiting > 0 ->
+    #state{info_fun = InfoFun, o_queue = #queue{out_waiting = Waiting, msg_ack_map = AckMap, queue = QQ} = Q} = State0) when Waiting > 0 ->
     %% qos2 flow
     Key = {pubrel, MessageId},
+    lager:debug("Puback arrived: ~p", [Key]),
     case cancel_retry_and_get(Key, State0) of
         {ok, {#mqtt_pubrel{}, State1}} ->
+            NextAck = maps:get(MessageId, AckMap),
             NewWaiting = maybe_ack_msgs(QQ, NextAck, Waiting),
             NewQ = Q#queue{out_waiting = NewWaiting, size = replayq:count(QQ)},
             lager:debug("Ack Msg ~p | NextAck: ~p | NewWaiting: ~p", [MessageId, NextAck, NewWaiting]),
@@ -778,6 +782,7 @@ send_publish(MsgId, Topic, Payload, QoS, Retain, Dup, State) ->
             State#state{info_fun = NewInfoFun};
         _ ->
             Key = {publish, MsgId},
+            lager:debug("Sent publish: ~p", [Key]),
             retry(Key, Frame#mqtt_publish{dup = true}, State#state{info_fun = NewInfoFun})
     end.
 
@@ -845,28 +850,30 @@ maybe_publish_offline_msgs(#state{o_queue = #queue{size = Size, out_waiting = Wa
 maybe_publish_offline_msgs(State) ->
     State.
 
-maybe_ack_msgs(_, _, Waiting) when Waiting == 0 ->
+maybe_ack_msgs(_, _, Waiting) when Waiting < 1 ->
     0;
-maybe_ack_msgs(Queue, AckRef, Waiting) when Waiting == 1 ->
+maybe_ack_msgs(Queue, AckRef, Waiting) ->
     ok = replayq:ack(Queue, AckRef),
     lager:debug("Sent Ack: ~p", [AckRef]),
-    0;
-maybe_ack_msgs(_, _, Waiting) ->
     Waiting - 1.
 
 %% TODO: pop from queue then publish
-publish_from_queue(#queue{size = Size, queue = QQ} = Q, State0) when Size > 0 ->
+publish_from_queue(#queue{size = Size, queue = QQ} = Q, #state{msgid = MsgID} = State0) when Size > 0 ->
     lager:debug("READING BATCH"),
-    NewQQ = foreach_pop(QQ, 7),
-    State0#state{o_queue = Q#queue{queue = QQ, size = replayq:count(QQ)}}.
+    BatchSize = lists:min([7, replayq:count(QQ)]),
+    MsgAckMap0 = maps:new(),
+    {NewQQ, MsgAckMap1} = foreach_pop(QQ, BatchSize, MsgID, MsgAckMap0),
+    lager:debug("Ack Map: ~p", [MsgAckMap1]),
+    State0#state{o_queue = Q#queue{queue = NewQQ, size = replayq:count(NewQQ), out_waiting = BatchSize, msg_ack_map = MsgAckMap1}}.
 
-foreach_pop(Queue, Count) when Count > 0 ->
+foreach_pop(Queue, Count, MsgID, Map) when Count > 0 ->
     {NewQ, AckRef, [Elem]} = replayq:pop(Queue, #{count_limit => 1}),
-    lager:debug("AckRef: ~p | Element: ~p", [AckRef, trunc_pubreq(Elem)]),
+    lager:debug("AckRef: ~p | Element: ~p | MSGID: ~p", [AckRef, trunc_pubreq(Elem), MsgID]),
+    Map1 = maps:put(MsgID, AckRef, Map),
     gen_fsm:send_event(self(), {publish_from_queue, Elem}),
-    foreach_pop(NewQ, Count - 1);
-foreach_pop(Queue, _) ->
-    Queue.
+    foreach_pop(NewQ, Count - 1, '++'(MsgID), Map1);
+foreach_pop(Queue, _, _, Map) ->
+    {Queue, Map}.
 
 %% TODO: drop only increments metrics 
 drop(#queue{drop = D} = Q) ->
