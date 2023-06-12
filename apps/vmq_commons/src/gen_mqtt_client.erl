@@ -601,7 +601,7 @@ handle_frame(connected, #mqtt_pubcomp{message_id = MessageId},
     #state{info_fun = InfoFun, o_queue = #queue{out_waiting = Waiting, msg_ack_map = AckMap, queue = QQ} = Q} = State0) when Waiting > 0 ->
     %% qos2 flow
     Key = {pubrel, MessageId},
-    lager:debug("Puback arrived: ~p", [Key]),
+    lager:debug("Pubcomp arrived: ~p", [Key]),
     case cancel_retry_and_get(Key, State0) of
         {ok, {#mqtt_pubrel{}, State1}} ->
             NextAck = maps:get(MessageId, AckMap),
@@ -782,7 +782,6 @@ send_publish(MsgId, Topic, Payload, QoS, Retain, Dup, State) ->
             State#state{info_fun = NewInfoFun};
         _ ->
             Key = {publish, MsgId},
-            lager:debug("Sent publish: ~p", [Key]),
             retry(Key, Frame#mqtt_publish{dup = true}, State#state{info_fun = NewInfoFun})
     end.
 
@@ -862,18 +861,27 @@ publish_from_queue(#queue{size = Size, queue = QQ} = Q, #state{msgid = MsgID} = 
     lager:debug("READING BATCH"),
     BatchSize = lists:min([7, replayq:count(QQ)]),
     MsgAckMap0 = maps:new(),
-    {NewQQ, MsgAckMap1} = foreach_pop(QQ, BatchSize, MsgID, MsgAckMap0),
+    {NewQQ, MsgAckMap1, Waiting} = foreach_pop(QQ, BatchSize, MsgID, MsgAckMap0, BatchSize),
     lager:debug("Ack Map: ~p", [MsgAckMap1]),
-    State0#state{o_queue = Q#queue{queue = NewQQ, size = replayq:count(NewQQ), out_waiting = BatchSize, msg_ack_map = MsgAckMap1}}.
+    State0#state{o_queue = Q#queue{queue = NewQQ, size = replayq:count(NewQQ), out_waiting = Waiting, msg_ack_map = MsgAckMap1}}.
 
-foreach_pop(Queue, Count, MsgID, Map) when Count > 0 ->
-    {NewQ, AckRef, [Elem]} = replayq:pop(Queue, #{count_limit => 1}),
+foreach_pop(Queue, Count, MsgID, Map, Waiting) when Count > 0 ->
+    {NewQ, AckRef, [{_, _, QoS, _, _} = Elem]} = replayq:pop(Queue, #{count_limit => 1}),
     lager:debug("AckRef: ~p | Element: ~p | MSGID: ~p", [AckRef, trunc_pubreq(Elem), MsgID]),
-    Map1 = maps:put(MsgID, AckRef, Map),
     gen_fsm:send_event(self(), {publish_from_queue, Elem}),
-    foreach_pop(NewQ, Count - 1, '++'(MsgID), Map1);
-foreach_pop(Queue, _, _, Map) ->
-    {Queue, Map}.
+    case QoS of
+        0 ->
+            ok = replayq:ack(Queue, AckRef),
+            lager:debug("Sent Ack: ~p", [AckRef]),
+            Map1 = Map, 
+            Waiting1 = Waiting - 1;
+        _ ->
+            Map1 = maps:put(MsgID, AckRef, Map),
+            Waiting1 = Waiting
+    end,
+    foreach_pop(NewQ, Count - 1, '++'(MsgID), Map1, Waiting1);
+foreach_pop(Queue, _, _, Map, Waiting) ->
+    {Queue, Map, Waiting}.
 
 %% TODO: drop only increments metrics 
 drop(#queue{drop = D} = Q) ->
