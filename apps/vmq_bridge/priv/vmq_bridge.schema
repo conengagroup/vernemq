@@ -88,6 +88,20 @@
                                                        hidden
                                                       ]}.
 
+%% @doc Configurea segment size (in Bytes) for the Bridge Queue.
+{mapping, "vmq_bridge.tcp.$name.segment_size", "vmq_bridge.config", [
+                                                             {default, 4096},
+                                                             {datatype, integer},
+                                                             {include_default, "br0"},
+                                                             {commented, 4096}
+                                                            ]}. 
+{mapping, "vmq_bridge.ssl.$name.segment_size", "vmq_bridge.config", [
+                                                       {default, 4096},
+                                                       {datatype, integer},
+                                                       {include_default, "sbr0"},
+                                                       hidden
+                                                      ]}.
+
 %% @doc Provide a Server Name Indication for an SSL endpoint
 {mapping, "vmq_bridge.ssl.$name.sni", "vmq_bridge.config", [
                                                        {datatype, string},
@@ -368,7 +382,7 @@
                             cuttlefish:invalid("should be a string of the form 'pattern [[[ out | in | both ] qos-level] local-prefix remote-prefix]'")
                     end,
 
-         Mappings = ["cleansession", "client_id", "keepalive_interval", 
+         Mappings = ["cleansession", "client_id", "keepalive_interval", "segment_size",
                     "username", "password", "restart_timeout", "try_private", "topic",
                      "max_outgoing_buffered_messages", "mqtt_version"],
                     %% SSL specific
@@ -421,6 +435,7 @@
          {TCPIPs, TCPCleanSessions} = lists:unzip(F("vmq_bridge.tcp", "cleansession", BoolVal)),
          {TCPIPs, TCPClientIds} = lists:unzip(F("vmq_bridge.tcp", "client_id", ClientIdVal)),
          {TCPIPs, TCPKeepAlive} = lists:unzip(F("vmq_bridge.tcp", "keepalive_interval", IntVal)),
+         {TCPIPs, TCPSegmentSize} = lists:unzip(F("vmq_bridge.tcp", "segment_size", IntVal)),
          {TCPIPs, TCPUserNames} = lists:unzip(F("vmq_bridge.tcp", "username", StringVal)),
          {TCPIPs, TCPPasswords} = lists:unzip(F("vmq_bridge.tcp", "password", StringVal)),
          {TCPIPs, TCPRestartTimeouts} = lists:unzip(F("vmq_bridge.tcp", "restart_timeout", IntVal)),
@@ -432,6 +447,7 @@
          {SSLIPs, SSLCleanSessions} = lists:unzip(F("vmq_bridge.ssl", "cleansession", BoolVal)),
          {SSLIPs, SSLClientIds} = lists:unzip(F("vmq_bridge.ssl", "client_id", ClientIdVal)),
          {SSLIPs, SSLKeepAlive} = lists:unzip(F("vmq_bridge.ssl", "keepalive_interval", IntVal)),
+         {SSLIPs, SSLSegmentSize} = lists:unzip(F("vmq_bridge.ssl", "segment_size", IntVal)),
          {SSLIPs, SSLUserNames} = lists:unzip(F("vmq_bridge.ssl", "username", StringVal)),
          {SSLIPs, SSLPasswords} = lists:unzip(F("vmq_bridge.ssl", "password", StringVal)),
          {SSLIPs, SSLRestartTimeouts} = lists:unzip(F("vmq_bridge.ssl", "restart_timeout", IntVal)),
@@ -454,7 +470,8 @@
 
          TCP = lists:zip(TCPIPs, MZip([TCPCleanSessions, 
                                        TCPClientIds, 
-                                       TCPKeepAlive, 
+                                       TCPKeepAlive,
+                                       TCPSegmentSize, 
                                        TCPRestartTimeouts,
                                        TCPUserNames, 
                                        TCPPasswords,
@@ -466,6 +483,7 @@
          SSL = lists:zip(SSLIPs, MZip([SSLCleanSessions, 
                                        SSLClientIds, 
                                        SSLKeepAlive, 
+                                       SSLSegmentSize,
                                        SSLRestartTimeouts,
                                        SSLUserNames, 
                                        SSLPasswords,

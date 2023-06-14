@@ -118,6 +118,7 @@ reconfigure_bridges(_, _, []) ->
 start_bridge(Type, Ref, Host, Port, Opts) ->
     {ok, RegistryMFA} = application:get_env(vmq_bridge, registry_mfa),
     {_, Name, _, _} = Ref,
+    lager:debug("Opts: ~p", [Opts]),
     ChildSpec =
         {Ref, {vmq_bridge, start_link, [Type, Host, Port, RegistryMFA, [{name, Name} | Opts]]},
             permanent, 5000, worker, [vmq_bridge]},
