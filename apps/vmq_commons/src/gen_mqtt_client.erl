@@ -397,7 +397,7 @@ init([Mod, Args, Opts]) ->
     MaxQueueSize = proplists:get_value(max_queue_size, Opts, 0),
     {Transport, TransportOpts} = proplists:get_value(transport, Opts, {gen_tcp, []}),
     %% TODO: replayq DIR should be read from config
-    RqConfig = #{dir => ?DIR, seg_bytes => 800,
+    RqConfig = #{dir => ?DIR, seg_bytes => SegmentSize,
         sizer => fun(K) -> byte_size(term_to_binary(K)) end,
         marshaller => fun(K) when not is_binary(K) -> term_to_binary(K);
                         (Bin)-> binary_to_term(Bin)
