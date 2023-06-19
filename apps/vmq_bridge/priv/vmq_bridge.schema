@@ -102,6 +102,22 @@
                                                        hidden
                                                       ]}.
 
+%% @doc Number of messages that will be read from Queue and published at once.
+%% Only after the entire batch has finished (e.g. all messages were pubacked if QoS 1),
+%% will the next batch be read. Set this to a low number if bandwidth is problematic. 
+{mapping, "vmq_bridge.tcp.$name.outgoing_batch_size", "vmq_bridge.config", [
+                                                             {default, 100},
+                                                             {datatype, integer},
+                                                             {include_default, "br0"},
+                                                             {commented, 100}
+                                                            ]}. 
+{mapping, "vmq_bridge.ssl.$name.outgoing_batch_size", "vmq_bridge.config", [
+                                                       {default, 100},
+                                                       {datatype, integer},
+                                                       {include_default, "sbr0"},
+                                                       hidden
+                                                      ]}.
+
 %% @doc Provide a Server Name Indication for an SSL endpoint
 {mapping, "vmq_bridge.ssl.$name.sni", "vmq_bridge.config", [
                                                        {datatype, string},
@@ -209,6 +225,22 @@
                                                                    {default, 0},
                                                                    hidden
                                                                   ]}.
+
+%% @doc Maximum size of ReplayQ on disk (if persistence is enabled) or in memory.
+%% Value given in megabytes. 
+%% Messages published while the buffer is full are dropped.
+{mapping, "vmq_bridge.tcp.$name.max_queue_total_size", "vmq_bridge.config", [
+                                                             {default, 10000},
+                                                             {datatype, integer},
+                                                             {include_default, "br0"},
+                                                             {commented, 10000}
+                                                            ]}. 
+{mapping, "vmq_bridge.ssl.$name.max_queue_total_size", "vmq_bridge.config", [
+                                                       {default, 10000},
+                                                       {datatype, integer},
+                                                       {include_default, "sbr0"},
+                                                       hidden
+                                                      ]}.
 
 %% @doc The cafile is used to define the path to a file containing
 %% the PEM encoded CA certificates that are trusted. 
@@ -382,9 +414,9 @@
                             cuttlefish:invalid("should be a string of the form 'pattern [[[ out | in | both ] qos-level] local-prefix remote-prefix]'")
                     end,
 
-         Mappings = ["cleansession", "client_id", "keepalive_interval", "segment_size",
+         Mappings = ["cleansession", "client_id", "keepalive_interval", "segment_size", "outgoing_batch_size",
                     "username", "password", "restart_timeout", "try_private", "topic",
-                     "max_outgoing_buffered_messages", "mqtt_version"],
+                     "max_outgoing_buffered_messages", "max_queue_total_size", "mqtt_version"],
                     %% SSL specific
          SSLMapps = ["cafile", "certfile", "keyfile", "insecure", "tls_version", "identity", "psk", "depth", 
          "customize_hostname_check", "sni"],
@@ -436,24 +468,28 @@
          {TCPIPs, TCPClientIds} = lists:unzip(F("vmq_bridge.tcp", "client_id", ClientIdVal)),
          {TCPIPs, TCPKeepAlive} = lists:unzip(F("vmq_bridge.tcp", "keepalive_interval", IntVal)),
          {TCPIPs, TCPSegmentSize} = lists:unzip(F("vmq_bridge.tcp", "segment_size", IntVal)),
+         {TCPIPs, TCPOutBatchSize} = lists:unzip(F("vmq_bridge.tcp", "outgoing_batch_size", IntVal)),
          {TCPIPs, TCPUserNames} = lists:unzip(F("vmq_bridge.tcp", "username", StringVal)),
          {TCPIPs, TCPPasswords} = lists:unzip(F("vmq_bridge.tcp", "password", StringVal)),
          {TCPIPs, TCPRestartTimeouts} = lists:unzip(F("vmq_bridge.tcp", "restart_timeout", IntVal)),
          {TCPIPs, TCPTryPrivates} = lists:unzip(F("vmq_bridge.tcp", "try_private", BoolVal)),
          {TCPIPs, TCPMQTTProtos} = lists:unzip(F("vmq_bridge.tcp", "mqtt_version", IntAtomVal)),
          {TCPIPs, TCPMaxBuffer} = lists:unzip(F("vmq_bridge.tcp", "max_outgoing_buffered_messages", IntVal)),
+         {TCPIPs, TCPMaxQueueSize} = lists:unzip(F("vmq_bridge.tcp", "max_queue_total_size", IntVal)),
          {TCPIPs, TCPTopics} = lists:unzip(F("vmq_bridge.tcp", "topic", TopicVal)),
 
          {SSLIPs, SSLCleanSessions} = lists:unzip(F("vmq_bridge.ssl", "cleansession", BoolVal)),
          {SSLIPs, SSLClientIds} = lists:unzip(F("vmq_bridge.ssl", "client_id", ClientIdVal)),
          {SSLIPs, SSLKeepAlive} = lists:unzip(F("vmq_bridge.ssl", "keepalive_interval", IntVal)),
          {SSLIPs, SSLSegmentSize} = lists:unzip(F("vmq_bridge.ssl", "segment_size", IntVal)),
+         {SSLIPs, SSLOutBatchSize} = lists:unzip(F("vmq_bridge.ssl", "outgoing_batch_size", IntVal)),
          {SSLIPs, SSLUserNames} = lists:unzip(F("vmq_bridge.ssl", "username", StringVal)),
          {SSLIPs, SSLPasswords} = lists:unzip(F("vmq_bridge.ssl", "password", StringVal)),
          {SSLIPs, SSLRestartTimeouts} = lists:unzip(F("vmq_bridge.ssl", "restart_timeout", IntVal)),
          {SSLIPs, SSLTryPrivates} = lists:unzip(F("vmq_bridge.ssl", "try_private", BoolVal)),
          {SSLIPs, SSLMQTTProtos} = lists:unzip(F("vmq_bridge.ssl", "mqtt_version", IntAtomVal)),
          {SSLIPs, SSLMaxBuffer} = lists:unzip(F("vmq_bridge.ssl", "max_outgoing_buffered_messages", IntVal)),
+         {SSLIPs, SSLMaxQueueSize} = lists:unzip(F("vmq_bridge.ssl", "max_queue_total_size", IntVal)),
          {SSLIPs, SSLTopics} = lists:unzip(F("vmq_bridge.ssl", "topic", TopicVal)),
 
          % SSL
@@ -471,25 +507,29 @@
          TCP = lists:zip(TCPIPs, MZip([TCPCleanSessions, 
                                        TCPClientIds, 
                                        TCPKeepAlive,
-                                       TCPSegmentSize, 
+                                       TCPSegmentSize,
+                                       TCPOutBatchSize, 
                                        TCPRestartTimeouts,
                                        TCPUserNames, 
                                        TCPPasswords,
                                        TCPTryPrivates,
                                        TCPMQTTProtos,
                                        TCPMaxBuffer,
+                                       TCPMaxQueueSize,
                                        TCPTopics])),
 
          SSL = lists:zip(SSLIPs, MZip([SSLCleanSessions, 
                                        SSLClientIds, 
                                        SSLKeepAlive, 
                                        SSLSegmentSize,
+                                       SSLOutBatchSize,
                                        SSLRestartTimeouts,
                                        SSLUserNames, 
                                        SSLPasswords,
                                        SSLTryPrivates,
                                        SSLMQTTProtos,
                                        SSLMaxBuffer,
+                                       SSLMaxQueueSize,
                                        SSLTopics,
                                        SSLCAFiles, 
                                        SSLCertFiles,

@@ -426,9 +426,11 @@ client_opts(tcp, Host, Port, Opts) ->
             {clean_session, proplists:get_value(cleansession, Opts, false)},
             {keepalive_interval, proplists:get_value(keepalive_interval, Opts)},
             {segment_size, proplists:get_value(segment_size, Opts)},
+            {out_batch_size, proplists:get_value(outgoing_batch_size, Opts)},
             {reconnect_timeout, proplists:get_value(restart_timeout, Opts)},
             {retry_interval, proplists:get_value(retry_interval, Opts)},
             {max_queue_size, proplists:get_value(max_outgoing_buffered_messages, Opts)},
+            {max_total_size_mbytes, proplists:get_value(max_queue_total_size, Opts)},
             {transport, {gen_tcp, []}}
             | case
                 {
