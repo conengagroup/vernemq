@@ -115,7 +115,6 @@
 ]).
 
 -define(MQTT_PROTO_MAJOR, 3).
--define(DIR, "./replayq-data").
 
 %% TODO: update record to use replayq
 -record(queue, {
@@ -390,6 +389,8 @@ init([Mod, Args, Opts]) ->
     LWQos = proplists:get_value(last_will_qos, Opts, 0),
     ReconnectTimeout = proplists:get_value(reconnect_timeout, Opts, undefined),
     KeepAliveInterval = proplists:get_value(keepalive_interval, Opts, 60),
+    Persistent = proplists:get_value(persistent, Opts, false),
+    ReplayqDir = proplists:get_value(queue_dir, Opts, "/qdata/" ++ ClientId),
     SegmentSize = proplists:get_value(segment_size, Opts, 4096),
     BatchSize = proplists:get_value(out_batch_size, Opts, 100),
     lager:debug("Opts: ~p", [Opts]),
@@ -398,15 +399,22 @@ init([Mod, Args, Opts]) ->
     InfoFun = proplists:get_value(info_fun, Opts, {fun(_, _) -> ok end, []}),
     %% TODO: max queue size
     MaxQueueSize = proplists:get_value(max_queue_size, Opts, 0),    
-    MaxTotalSizeMBytes = proplists:get_value(max_total_size_mbytes, Opts, 10000),    
+    MaxTotalSizeBytes = proplists:get_value(max_total_size_mbytes, Opts, 10000) * 1000000,    %%multiply with 1000000 to get bytes from MB
     {Transport, TransportOpts} = proplists:get_value(transport, Opts, {gen_tcp, []}),
-    %% TODO: replayq DIR should be read from config
-    RqConfig = #{dir => ?DIR, seg_bytes => SegmentSize,
-        sizer => fun(K) -> byte_size(term_to_binary(K)) end,
-        marshaller => fun(K) when not is_binary(K) -> term_to_binary(K);
-                        (Bin)-> binary_to_term(Bin)
-                    end
-    },
+    RqConfig = if Persistent == true ->
+        #{dir => ReplayqDir ++ "/msgdata", seg_bytes => SegmentSize,
+            max_total_bytes => MaxTotalSizeBytes + 1000000,
+            sizer => fun(K) -> byte_size(term_to_binary(K)) end,
+            marshaller => fun(K) when not is_binary(K) -> term_to_binary(K);
+                            (Bin)-> binary_to_term(Bin)
+                        end
+        };
+    true ->
+        #{mem_only => true, max_total_bytes => MaxTotalSizeBytes + 1000000,
+            sizer => fun(K) -> byte_size(term_to_binary(K)) end
+        }
+    end,
+    lager:debug("Config: ~p", [RqConfig]),
     RQ = replayq:open(RqConfig),
     State = #state{
         host = Host,
@@ -430,7 +438,7 @@ init([Mod, Args, Opts]) ->
         transport = {Transport, TransportOpts},
         o_queue = #queue{max = MaxQueueSize, config = RqConfig, 
                         queue = RQ, batch_size = BatchSize, 
-                        max_bytes = MaxTotalSizeMBytes * 1000000, 
+                        max_bytes = MaxTotalSizeBytes, 
                         size = replayq:count(RQ), size_bytes = replayq:bytes(RQ)},
         info_fun = InfoFun
     },
