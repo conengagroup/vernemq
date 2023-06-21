@@ -390,10 +390,15 @@ init([Mod, Args, Opts]) ->
     ReconnectTimeout = proplists:get_value(reconnect_timeout, Opts, undefined),
     KeepAliveInterval = proplists:get_value(keepalive_interval, Opts, 60),
     Persistent = proplists:get_value(persistent, Opts, false),
-    ReplayqDir = proplists:get_value(queue_dir, Opts, "/qdata/" ++ ClientId),
+    QDir = proplists:get_value(queue_dir, Opts, "/qdata/" ++ ClientId),
+    B0 = string:find(QDir, "./") =:= QDir,
+    ReplayqDir = if B0 == true ->
+        QDir;
+    true ->
+        "./" ++ QDir
+    end,
     SegmentSize = proplists:get_value(segment_size, Opts, 4096),
     BatchSize = proplists:get_value(out_batch_size, Opts, 100),
-    lager:debug("Opts: ~p", [Opts]),
     RetryInterval = proplists:get_value(retry_interval, Opts, 10),
     ProtoVer = proplists:get_value(proto_version, Opts, ?MQTT_PROTO_MAJOR),
     InfoFun = proplists:get_value(info_fun, Opts, {fun(_, _) -> ok end, []}),
