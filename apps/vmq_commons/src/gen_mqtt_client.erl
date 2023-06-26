@@ -125,9 +125,7 @@
     batch_size :: non_neg_integer(),
     %% max queue size. 0 means disabled.
     max = 0 :: non_neg_integer(),
-    max_bytes :: non_neg_integer(),
     size = 0 :: non_neg_integer(),
-    size_bytes = 0 :: non_neg_integer(),
     drop = 0 :: non_neg_integer()
 }).
 
@@ -403,19 +401,18 @@ init([Mod, Args, Opts]) ->
     ProtoVer = proplists:get_value(proto_version, Opts, ?MQTT_PROTO_MAJOR),
     InfoFun = proplists:get_value(info_fun, Opts, {fun(_, _) -> ok end, []}),
     %% TODO: max queue size
-    MaxQueueSize = proplists:get_value(max_queue_size, Opts, 0),    
-    MaxTotalSizeBytes = proplists:get_value(max_total_size_mbytes, Opts, 10000) * 1000000,    %%multiply with 1000000 to get bytes from MB
+    MaxQueueSize = proplists:get_value(max_queue_size, Opts, 0),
     {Transport, TransportOpts} = proplists:get_value(transport, Opts, {gen_tcp, []}),
     RqConfig = if Persistent == true ->
         #{dir => ReplayqDir ++ "/msgdata", seg_bytes => SegmentSize,
-            max_total_bytes => MaxTotalSizeBytes + 1000000,
+            max_total_bytes => 137000000000,
             sizer => fun(K) -> byte_size(term_to_binary(K)) end,
             marshaller => fun(K) when not is_binary(K) -> term_to_binary(K);
                             (Bin)-> binary_to_term(Bin)
                         end
         };
     true ->
-        #{mem_only => true, max_total_bytes => MaxTotalSizeBytes + 1000000,
+        #{mem_only => true, max_total_bytes => 8000000000,
             sizer => fun(K) -> byte_size(term_to_binary(K)) end
         }
     end,
@@ -442,9 +439,8 @@ init([Mod, Args, Opts]) ->
         retry_interval = 1000 * RetryInterval,
         transport = {Transport, TransportOpts},
         o_queue = #queue{max = MaxQueueSize, config = RqConfig, 
-                        queue = RQ, batch_size = BatchSize, 
-                        max_bytes = MaxTotalSizeBytes, 
-                        size = replayq:count(RQ), size_bytes = replayq:bytes(RQ)},
+                        queue = RQ, batch_size = BatchSize,
+                        size = replayq:count(RQ)},
         info_fun = InfoFun
     },
     Res = wrap_res(connecting, init, [Args], State),
@@ -569,7 +565,7 @@ handle_frame(connected, #mqtt_puback{message_id = MessageId},
         {ok, {#mqtt_publish{}, State1}} ->
             NextAck = maps:get(MessageId, AckMap),
             NewWaiting = maybe_ack_msgs(QQ, NextAck, Waiting),
-            NewQ = Q#queue{out_waiting = NewWaiting, size = replayq:count(QQ), size_bytes = replayq:bytes(QQ)},
+            NewQ = Q#queue{out_waiting = NewWaiting, size = replayq:count(QQ)},
             lager:debug("Ack Msg ~p | NextAck: ~p | NewWaiting: ~p", [MessageId, NextAck, NewWaiting]),
             NewInfoFun = call_info_fun({puback_in, MessageId}, InfoFun),
             State2 = maybe_publish_offline_msgs(State1#state{info_fun = NewInfoFun, o_queue = NewQ}),
@@ -629,7 +625,7 @@ handle_frame(connected, #mqtt_pubcomp{message_id = MessageId},
         {ok, {#mqtt_pubrel{}, State1}} ->
             NextAck = maps:get(MessageId, AckMap),
             NewWaiting = maybe_ack_msgs(QQ, NextAck, Waiting),
-            NewQ = Q#queue{out_waiting = NewWaiting, size = replayq:count(QQ), size_bytes = replayq:bytes(QQ)},
+            NewQ = Q#queue{out_waiting = NewWaiting, size = replayq:count(QQ)},
             lager:debug("Ack Msg ~p | NextAck: ~p | NewWaiting: ~p", [MessageId, NextAck, NewWaiting]),
             NewInfoFun = call_info_fun({pubcomp_in, MessageId}, InfoFun),
             State2 = maybe_publish_offline_msgs(State1#state{info_fun = NewInfoFun, o_queue = NewQ}),
@@ -851,7 +847,7 @@ maybe_reconnect(
 maybe_queue_outgoing(_PubReq, #state{o_queue = #queue{max = 0}} = State) ->
     %% queue is disabled
     State;
-maybe_queue_outgoing(PubReq, #state{o_queue = #queue{size_bytes = Size, max_bytes = Max} = Q} = State) when
+maybe_queue_outgoing(PubReq, #state{o_queue = #queue{size = Size, max = Max} = Q} = State) when
     Size < Max
 ->
     State#state{o_queue = queue_outgoing(PubReq, Q)};
@@ -864,9 +860,7 @@ maybe_queue_outgoing(PubReq, #state{o_queue = Q} = State) ->
 queue_outgoing(Msg, #queue{queue = QQ} = Q) ->
     lager:debug("Add to Queue MSG: ~p\n", [trunc_pubreq(Msg)]),
     NewQQ = replayq:append(QQ, [Msg]),
-    SizeBytes = replayq:bytes(NewQQ),
-    lager:debug("Queue Size in Bytes: ~p\n", [SizeBytes]),
-    Q#queue{size = replayq:count(NewQQ), size_bytes = SizeBytes, queue = NewQQ}.
+    Q#queue{size = replayq:count(NewQQ), queue = NewQQ}.
 
 %% TODO: publish from queue logic
 maybe_publish_offline_msgs(#state{o_queue = #queue{size = Size, out_waiting = Waiting} = Q} = State) when Size > 0 , Waiting < 1 ->
@@ -888,9 +882,7 @@ publish_from_queue(#queue{size = Size, queue = QQ, batch_size = BatchSize0} = Q,
     MsgAckMap0 = maps:new(),
     {NewQQ, MsgAckMap1, Waiting} = foreach_pop(QQ, BatchSize1, MsgID, MsgAckMap0, BatchSize1),
     lager:debug("Ack Map: ~p", [MsgAckMap1]),
-    SizeBytes = replayq:bytes(NewQQ),
-    lager:debug("Queue Size in Bytes: ~p\n", [SizeBytes]),
-    State0#state{o_queue = Q#queue{queue = NewQQ, size = replayq:count(NewQQ), size_bytes = SizeBytes, 
+    State0#state{o_queue = Q#queue{queue = NewQQ, size = replayq:count(NewQQ),
                 out_waiting = Waiting, msg_ack_map = MsgAckMap1}}.
 
 foreach_pop(Queue, Count, MsgID, Map, Waiting) when Count > 0 ->
