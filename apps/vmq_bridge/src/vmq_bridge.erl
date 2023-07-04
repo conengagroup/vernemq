@@ -432,7 +432,6 @@ client_opts(tcp, Host, Port, Opts) ->
             {reconnect_timeout, proplists:get_value(restart_timeout, Opts)},
             {retry_interval, proplists:get_value(retry_interval, Opts)},
             {max_queue_size, proplists:get_value(max_outgoing_buffered_messages, Opts)},
-            {max_total_size_mbytes, proplists:get_value(max_queue_total_size, Opts)},
             {transport, {gen_tcp, []}}
             | case
                 {

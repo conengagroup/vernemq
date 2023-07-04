@@ -256,22 +256,6 @@
                                                                    hidden
                                                                   ]}.
 
-%% @doc Maximum size of ReplayQ on disk (if persistence is enabled) or in memory.
-%% Value given in megabytes. 
-%% Messages published while the buffer is full are dropped.
-{mapping, "vmq_bridge.tcp.$name.max_queue_total_size", "vmq_bridge.config", [
-                                                             {default, 10000},
-                                                             {datatype, integer},
-                                                             {include_default, "br0"},
-                                                             {commented, 10000}
-                                                            ]}. 
-{mapping, "vmq_bridge.ssl.$name.max_queue_total_size", "vmq_bridge.config", [
-                                                       {default, 10000},
-                                                       {datatype, integer},
-                                                       {include_default, "sbr0"},
-                                                       hidden
-                                                      ]}.
-
 %% @doc The cafile is used to define the path to a file containing
 %% the PEM encoded CA certificates that are trusted. 
 {mapping, "vmq_bridge.ssl.$name.cafile", "vmq_bridge.config", [
@@ -447,7 +431,7 @@
          Mappings = ["cleansession", "client_id", "keepalive_interval", "segment_size", "outgoing_batch_size",
                     "persistent_queue", "queue_dir",
                     "username", "password", "restart_timeout", "try_private", "topic",
-                     "max_outgoing_buffered_messages", "max_queue_total_size", "mqtt_version"],
+                     "max_outgoing_buffered_messages", "mqtt_version"],
                     %% SSL specific
          SSLMapps = ["cafile", "certfile", "keyfile", "insecure", "tls_version", "identity", "psk", "depth", 
          "customize_hostname_check", "sni"],
@@ -508,7 +492,6 @@
          {TCPIPs, TCPTryPrivates} = lists:unzip(F("vmq_bridge.tcp", "try_private", BoolVal)),
          {TCPIPs, TCPMQTTProtos} = lists:unzip(F("vmq_bridge.tcp", "mqtt_version", IntAtomVal)),
          {TCPIPs, TCPMaxBuffer} = lists:unzip(F("vmq_bridge.tcp", "max_outgoing_buffered_messages", IntVal)),
-         {TCPIPs, TCPMaxQueueSize} = lists:unzip(F("vmq_bridge.tcp", "max_queue_total_size", IntVal)),
          {TCPIPs, TCPTopics} = lists:unzip(F("vmq_bridge.tcp", "topic", TopicVal)),
 
          {SSLIPs, SSLCleanSessions} = lists:unzip(F("vmq_bridge.ssl", "cleansession", BoolVal)),
@@ -524,7 +507,6 @@
          {SSLIPs, SSLTryPrivates} = lists:unzip(F("vmq_bridge.ssl", "try_private", BoolVal)),
          {SSLIPs, SSLMQTTProtos} = lists:unzip(F("vmq_bridge.ssl", "mqtt_version", IntAtomVal)),
          {SSLIPs, SSLMaxBuffer} = lists:unzip(F("vmq_bridge.ssl", "max_outgoing_buffered_messages", IntVal)),
-         {SSLIPs, SSLMaxQueueSize} = lists:unzip(F("vmq_bridge.ssl", "max_queue_total_size", IntVal)),
          {SSLIPs, SSLTopics} = lists:unzip(F("vmq_bridge.ssl", "topic", TopicVal)),
 
          % SSL
@@ -552,7 +534,6 @@
                                        TCPTryPrivates,
                                        TCPMQTTProtos,
                                        TCPMaxBuffer,
-                                       TCPMaxQueueSize,
                                        TCPTopics])),
 
          SSL = lists:zip(SSLIPs, MZip([SSLCleanSessions, 
@@ -568,7 +549,6 @@
                                        SSLTryPrivates,
                                        SSLMQTTProtos,
                                        SSLMaxBuffer,
-                                       SSLMaxQueueSize,
                                        SSLTopics,
                                        SSLCAFiles, 
                                        SSLCertFiles,
