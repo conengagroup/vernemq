@@ -402,7 +402,6 @@ init([Mod, Args, Opts]) ->
             end;
         {_, false} -> ok
     end,
-    lager:debug("~p", [ReplayqDir]),
     SegmentSize = proplists:get_value(segment_size, Opts, 4096),
     BatchSize = proplists:get_value(out_batch_size, Opts, 100),
     RetryInterval = proplists:get_value(retry_interval, Opts, 10),
@@ -414,7 +413,6 @@ init([Mod, Args, Opts]) ->
     QRatio1 = if (QRatio0 >= 0) and (QRatio0 =< 100) -> QRatio0 / 100;
         true -> 0.0
     end,
-    lager:debug("QRatio: ~p", [QRatio1]),
     {Transport, TransportOpts} = proplists:get_value(transport, Opts, {gen_tcp, []}),
     RqConfig = if Persistent == true ->
         #{dir => ReplayqDir ++ "/msgdata", seg_bytes => SegmentSize,
