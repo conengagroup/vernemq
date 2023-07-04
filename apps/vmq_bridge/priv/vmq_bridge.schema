@@ -75,9 +75,9 @@
                                                        hidden
                                                       ]}. 
 
-%% @doc Set the directory where queued messages will be stored, if persistent_queue is set to on.
-%% If you have multiple bridges, make sure to configure unique directories for 
-%% each bridge instance. 
+%% @doc Set the directory where queued messages for this bridge will be stored, if persistent_queue is set to on.
+%% It is recommended to set this to a unique directory. If you're using multiple persistent bridge instances, 
+%% then omitting this option can lead to serious problems. 
 {mapping, "vmq_bridge.tcp.$name.queue_dir", "vmq_bridge.config", [
                                                              {datatype, string},
                                                              {include_default, "br0"},

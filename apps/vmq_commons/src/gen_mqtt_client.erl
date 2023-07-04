@@ -388,13 +388,21 @@ init([Mod, Args, Opts]) ->
     ReconnectTimeout = proplists:get_value(reconnect_timeout, Opts, undefined),
     KeepAliveInterval = proplists:get_value(keepalive_interval, Opts, 60),
     Persistent = proplists:get_value(persistent, Opts, false),
-    QDir = proplists:get_value(queue_dir, Opts, "/qdata/" ++ ClientId),
-    B0 = string:find(QDir, "./") =:= QDir,
-    ReplayqDir = if B0 == true ->
-        QDir;
-    true ->
-        "./" ++ QDir
+    QDir = proplists:get_value(queue_dir, Opts, undefined),
+    ReplayqDir = case {QDir, Persistent} of 
+        {undefined, true} -> 
+            lager:warning("queue_dir hasn't been configured. This will lead to problems if more than one persistent bridge instance is being used!", []),
+            "./qdata/" ++ ClientId;
+        {_, true} -> 
+            B0 = string:find(QDir, "./") =:= QDir,
+            if B0 == true ->
+                QDir;
+            true ->
+                "./" ++ QDir
+            end;
+        {_, false} -> ok
     end,
+    lager:debug("~p", [ReplayqDir]),
     SegmentSize = proplists:get_value(segment_size, Opts, 4096),
     BatchSize = proplists:get_value(out_batch_size, Opts, 100),
     RetryInterval = proplists:get_value(retry_interval, Opts, 10),
