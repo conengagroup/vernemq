@@ -410,7 +410,11 @@ init([Mod, Args, Opts]) ->
     InfoFun = proplists:get_value(info_fun, Opts, {fun(_, _) -> ok end, []}),
     %% TODO: max queue size
     MaxQueueSize = proplists:get_value(max_queue_size, Opts, 0),
-    QRatio = 0.1,
+    QRatio0 = proplists:get_value(queue_ratio, Opts, 0.1),
+    QRatio1 = if (QRatio0 >= 0) and (QRatio0 =< 100) -> QRatio0 / 100;
+        true -> 0.0
+    end,
+    lager:debug("QRatio: ~p", [QRatio1]),
     {Transport, TransportOpts} = proplists:get_value(transport, Opts, {gen_tcp, []}),
     RqConfig = if Persistent == true ->
         #{dir => ReplayqDir ++ "/msgdata", seg_bytes => SegmentSize,
@@ -460,10 +464,10 @@ init([Mod, Args, Opts]) ->
         keepalive_interval = 1000 * KeepAliveInterval,
         retry_interval = 1000 * RetryInterval,
         transport = {Transport, TransportOpts},
-        o_queue = #queue{max = trunc(MaxQueueSize * (1 - QRatio)), config = RqConfig, 
+        o_queue = #queue{max = trunc(MaxQueueSize * (1 - QRatio1)), config = RqConfig, 
                         queue = RQ, batch_size = BatchSize,
                         size = replayq:count(RQ)},
-        pubrel_queue = #queue{max = trunc(MaxQueueSize * QRatio), config = PubrelQConfig,
+        pubrel_queue = #queue{max = trunc(MaxQueueSize * QRatio1), config = PubrelQConfig,
                             queue = PubrelQ, batch_size = BatchSize,
                             size = replayq:count(PubrelQ)},
         info_fun = InfoFun

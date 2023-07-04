@@ -256,6 +256,22 @@
                                                                    hidden
                                                                   ]}.
 
+%% @doc Percentage of max buffered messages that will be used for the pubrel queue. 
+%% The pubrel queue is only relevant, if you'll be bridging topics with QoS 2.
+%% Allowed values: 0-100, e.g. value of 10 means 10%. If this is set to 0, the pubrel queue will be disabled.
+%% Caution: the segment_size should not be bigger than max_outgoing_buffered_messages * pubrel_queue_ratio.
+{mapping, "vmq_bridge.tcp.$name.pubrel_queue_ratio", "vmq_bridge.config", [
+                                                                    {datatype, integer},
+                                                                    {default, 10},
+                                                                    {include_default, "br0"},
+                                                                    {commented, 10}
+                                                                   ]}.
+{mapping, "vmq_bridge.ssl.$name.pubrel_queue_ratio", "vmq_bridge.config", [
+                                                                       {datatype, integer},
+                                                                       {default, 10},
+                                                                       hidden
+                                                                      ]}.
+
 %% @doc The cafile is used to define the path to a file containing
 %% the PEM encoded CA certificates that are trusted. 
 {mapping, "vmq_bridge.ssl.$name.cafile", "vmq_bridge.config", [
@@ -431,7 +447,7 @@
          Mappings = ["cleansession", "client_id", "keepalive_interval", "segment_size", "outgoing_batch_size",
                     "persistent_queue", "queue_dir",
                     "username", "password", "restart_timeout", "try_private", "topic",
-                     "max_outgoing_buffered_messages", "mqtt_version"],
+                     "max_outgoing_buffered_messages", "pubrel_queue_ratio", "mqtt_version"],
                     %% SSL specific
          SSLMapps = ["cafile", "certfile", "keyfile", "insecure", "tls_version", "identity", "psk", "depth", 
          "customize_hostname_check", "sni"],
@@ -492,6 +508,7 @@
          {TCPIPs, TCPTryPrivates} = lists:unzip(F("vmq_bridge.tcp", "try_private", BoolVal)),
          {TCPIPs, TCPMQTTProtos} = lists:unzip(F("vmq_bridge.tcp", "mqtt_version", IntAtomVal)),
          {TCPIPs, TCPMaxBuffer} = lists:unzip(F("vmq_bridge.tcp", "max_outgoing_buffered_messages", IntVal)),
+         {TCPIPs, TCPQueueRatio} = lists:unzip(F("vmq_bridge.tcp", "pubrel_queue_ratio", IntVal)),
          {TCPIPs, TCPTopics} = lists:unzip(F("vmq_bridge.tcp", "topic", TopicVal)),
 
          {SSLIPs, SSLCleanSessions} = lists:unzip(F("vmq_bridge.ssl", "cleansession", BoolVal)),
@@ -507,6 +524,7 @@
          {SSLIPs, SSLTryPrivates} = lists:unzip(F("vmq_bridge.ssl", "try_private", BoolVal)),
          {SSLIPs, SSLMQTTProtos} = lists:unzip(F("vmq_bridge.ssl", "mqtt_version", IntAtomVal)),
          {SSLIPs, SSLMaxBuffer} = lists:unzip(F("vmq_bridge.ssl", "max_outgoing_buffered_messages", IntVal)),
+         {SSLIPs, SSLQueueRatio} = lists:unzip(F("vmq_bridge.ssl", "pubrel_queue_ratio", IntVal)),
          {SSLIPs, SSLTopics} = lists:unzip(F("vmq_bridge.ssl", "topic", TopicVal)),
 
          % SSL
@@ -534,6 +552,7 @@
                                        TCPTryPrivates,
                                        TCPMQTTProtos,
                                        TCPMaxBuffer,
+                                       TCPQueueRatio,
                                        TCPTopics])),
 
          SSL = lists:zip(SSLIPs, MZip([SSLCleanSessions, 
@@ -549,6 +568,7 @@
                                        SSLTryPrivates,
                                        SSLMQTTProtos,
                                        SSLMaxBuffer,
+                                       SSLQueueRatio,
                                        SSLTopics,
                                        SSLCAFiles, 
                                        SSLCertFiles,
