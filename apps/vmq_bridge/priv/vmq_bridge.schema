@@ -257,18 +257,19 @@
                                                                   ]}.
 
 %% @doc Percentage of max buffered messages that will be used for the pubrel queue. 
-%% The pubrel queue is only relevant, if you'll be bridging topics with QoS 2.
-%% Allowed values: 0-100, e.g. value of 10 means 10%. If this is set to 0, the pubrel queue will be disabled.
+%% The pubrel queue is only relevant, if you'll be bridging topics with QoS 2. In that case it is highly recommended,
+%% to set this option. Allowed values: 0-100, e.g. value of 10 means 10%.
+%% If this is set to 0, the pubrel queue will be disabled (disabled by default).
 %% Caution: the segment_size should not be bigger than max_outgoing_buffered_messages * pubrel_queue_ratio.
 {mapping, "vmq_bridge.tcp.$name.pubrel_queue_ratio", "vmq_bridge.config", [
                                                                     {datatype, integer},
-                                                                    {default, 10},
+                                                                    {default, 0},
                                                                     {include_default, "br0"},
                                                                     {commented, 10}
                                                                    ]}.
 {mapping, "vmq_bridge.ssl.$name.pubrel_queue_ratio", "vmq_bridge.config", [
                                                                        {datatype, integer},
-                                                                       {default, 10},
+                                                                       {default, 0},
                                                                        hidden
                                                                       ]}.
 

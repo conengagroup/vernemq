@@ -409,7 +409,7 @@ init([Mod, Args, Opts]) ->
     InfoFun = proplists:get_value(info_fun, Opts, {fun(_, _) -> ok end, []}),
     %% TODO: max queue size
     MaxQueueSize = proplists:get_value(max_queue_size, Opts, 0),
-    QRatio0 = proplists:get_value(queue_ratio, Opts, 0.1),
+    QRatio0 = proplists:get_value(queue_ratio, Opts, 0),
     QRatio1 = if (QRatio0 >= 0) and (QRatio0 =< 100) -> QRatio0 / 100;
         true -> 0.0
     end,
