@@ -94,7 +94,8 @@
     disconnect/1,
     call/2,
     cast/2,
-    metrics/2
+    metrics/2,
+    try_transport_connect/2
 ]).
 
 %% gen_fsm callbacks
@@ -251,10 +252,7 @@ wrap_res({ok}, _StateName, _State) ->
 wrap_res(ok, _StateName, _State) ->
     ok.
 
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%%% State Callbacks
-%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-connecting(connect, State) ->
+try_transport_connect(Pid, State) ->
     #state{
         host = Host,
         port = Port,
@@ -264,18 +262,31 @@ connecting(connect, State) ->
     } = State,
     case Transport:connect(Host, Port, [binary, {packet, raw} | Opts]) of
         {ok, Sock} ->
-            NewInfoFun = call_info_fun({connect_out, ClientId}, InfoFun),
-            NewState = State#state{sock = Sock, buffer = <<>>, info_fun = NewInfoFun},
-            send_connect(NewState),
-            active_once(Transport, Sock),
-            {next_state, waiting_for_connack, NewState};
+            Transport:controlling_process(Sock, Pid),   %give ownership of socket to main process
+            gen_fsm:send_event(Pid, {on_transport_connect, Sock});
         {error, _Reason} ->
             error_logger:error_msg("connection to ~p:~p failed due to ~p", [Host, Port, _Reason]),
-            gen_fsm:send_event_after(3000, connect),
-            wrap_res(connecting, on_connect_error, [server_not_found], State)
-    end;
+            gen_fsm:send_event_after(3000, connect)
+    end.
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%% State Callbacks
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+connecting(connect, State) ->
+    spawn(gen_mqtt_client, try_transport_connect, [self(), State]),
+    {next_state, connecting, State};
 connecting(disconnect, State) ->
     {stop, normal, State};
+connecting({on_transport_connect, Sock}, #state{
+        transport = {Transport, _Opts},
+        client = ClientId,
+        info_fun = InfoFun
+    } = State) ->
+    NewInfoFun = call_info_fun({connect_out, ClientId}, InfoFun),
+    NewState = State#state{sock = Sock, buffer = <<>>, info_fun = NewInfoFun},
+    send_connect(NewState),
+    active_once(Transport, Sock),
+    {next_state, waiting_for_connack, NewState};
 connecting({publish, PubReq}, State) ->
     %% TODO
     NewState = maybe_queue_outgoing(PubReq, State),
