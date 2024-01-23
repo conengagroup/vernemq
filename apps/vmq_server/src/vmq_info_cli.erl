@@ -21,6 +21,8 @@
 register_cli() ->
     vmq_session_list_cmd(),
     vmq_session_disconnect_cmd(),
+    vmq_session_disconnect_clients_cmd(),
+    vmq_session_disconnect_batch_cmd(),
     vmq_session_reauthorize_cmd(),
     vmq_retain_show_cmd(),
     vmq_retain_delete_cmd(),
@@ -28,6 +30,12 @@ register_cli() ->
     clique:register_usage(["vmq-admin", "session"], session_usage()),
     clique:register_usage(["vmq-admin", "session", "show"], vmq_session_show_usage()),
     clique:register_usage(["vmq-admin", "session", "disconnect"], vmq_session_disconnect_usage()),
+    clique:register_usage(
+        ["vmq-admin", "session", "disconnect", "clients"], vmq_session_disconnect_clients_usage()
+    ),
+    clique:register_usage(
+        ["vmq-admin", "session", "disconnect", "batch"], vmq_session_disconnect_batch_usage()
+    ),
     clique:register_usage(["vmq-admin", "session", "reauthorize"], vmq_session_reauthorize_usage()),
     clique:register_usage(["vmq-admin", "retain"], retain_usage()),
     clique:register_usage(["vmq-admin", "retain", "show"], retain_show_usage()),
@@ -136,6 +144,134 @@ vmq_session_disconnect_cmd() ->
     end,
     clique:register_command(Cmd, KeySpecs, FlagSpecs, Callback).
 
+vmq_session_disconnect_clients_cmd() ->
+    Cmd = ["vmq-admin", "session", "disconnect", "clients"],
+    KeySpecs = [{'client-ids', [{typecast, fun(ClientId) -> ClientId end}]}],
+    FlagSpecs = [
+        {cleanup, [
+            {shortname, "c"},
+            {longname, "cleanup"}
+        ]},
+        {mountpoint, [
+            {shortname, "m"},
+            {longname, "mountpoint"},
+            {typecast, fun(Mountpoint) -> Mountpoint end}
+        ]}
+    ],
+
+    Callback = fun
+        (_, [{'client-ids', ClientId}], Flags) ->
+            DoCleanup = lists:keymember(cleanup, 1, Flags),
+            ClientIdList = string:tokens(ClientId, ","),
+            OrConditions = lists:map(fun(Id) -> "client_id = \"" ++ Id ++ "\"" end, ClientIdList),
+            QueryString0 =
+                "SELECT queue_pid FROM sessions WHERE (" ++ string:join(OrConditions, " OR "),
+            case proplists:get_value(mountpoint, Flags, "") of
+                undefined ->
+                    %% Unparsable mountpoint or without value
+                    Text = clique_status:text("Invalid mountpoint value"),
+                    [clique_status:alert([Text])];
+                Mountpoint ->
+                    QueryString1 = QueryString0 ++ ") AND mountpoint=\"" ++ Mountpoint ++ "\"",
+                    vmq_ql_query_mgr:fold_query(
+                        fun(Row, _) ->
+                            QueuePid = maps:get(queue_pid, Row),
+                            vmq_queue:force_disconnect(QueuePid, ?ADMINISTRATIVE_ACTION, DoCleanup)
+                        end,
+                        ok,
+                        QueryString1
+                    ),
+                    [clique_status:text("Done")]
+            end;
+        (_, _, _) ->
+            Text = clique_status:text(vmq_session_disconnect_usage()),
+            [clique_status:alert([Text])]
+    end,
+    clique:register_command(Cmd, KeySpecs, FlagSpecs, Callback).
+
+vmq_session_disconnect_batch_cmd() ->
+    Cmd = ["vmq-admin", "session", "disconnect", "batch"],
+    KeySpecs = [{'count', [{typecast, fun(Limit) -> Limit end}]}],
+    FlagSpecs = [
+        {cleanup, [
+            {shortname, "c"},
+            {longname, "cleanup"}
+        ]},
+        {mountpoint, [
+            {shortname, "m"},
+            {longname, "mountpoint"},
+            {typecast, fun(Mountpoint) -> Mountpoint end}
+        ]},
+        {filterIDs, [
+            {shortname, "f"},
+            {longname, "filter-client-ids"},
+            {typecast, fun(ClientId) -> ClientId end}
+        ]},
+        {node, [
+            {shortname, "n"},
+            {longname, "node"},
+            {typecast, fun(Node) -> Node end}
+        ]}
+    ],
+
+    Callback = fun
+        (_, [{'count', Limit}], Flags) ->
+            DoCleanup = lists:keymember(cleanup, 1, Flags),
+            ClientId = proplists:get_value(filterIDs, Flags, ""),
+            QueryWhereFilter =
+                case ClientId of
+                    undefined ->
+                        "";
+                    "" ->
+                        "";
+                    _ ->
+                        ClientIdList = string:tokens(ClientId, ","),
+                        OrConditions = lists:map(
+                            fun(Id) -> "client_id != \"" ++ Id ++ "\"" end, ClientIdList
+                        ),
+                        "(" ++ string:join(OrConditions, " AND ") ++ ") AND "
+                end,
+            Node = proplists:get_value(node, Flags, ""),
+            QueryWhereNodeFilter =
+                case Node of
+                    undefined ->
+                        "";
+                    "" ->
+                        "";
+                    _ ->
+                        NodeIdList = string:tokens(Node, ","),
+                        OrConditions2 = lists:map(
+                            fun(Id) -> "node = \"" ++ Id ++ "\"" end, NodeIdList
+                        ),
+                        "(" ++ string:join(OrConditions2, " AND ") ++ ") AND "
+                end,
+            QueryString0 =
+                "SELECT queue_pid FROM sessions WHERE " ++ QueryWhereFilter ++ QueryWhereNodeFilter,
+
+            case proplists:get_value(mountpoint, Flags, "") of
+                undefined ->
+                    %% Unparsable mountpoint or without value
+                    Text = clique_status:text("Invalid mountpoint value"),
+                    [clique_status:alert([Text])];
+                Mountpoint ->
+                    QueryString1 =
+                        QueryString0 ++ "mountpoint=\"" ++ Mountpoint ++ "\" LIMIT " ++ Limit,
+                    vmq_ql_query_mgr:fold_query(
+                        fun(Row, _) ->
+                            QueuePid = maps:get(queue_pid, Row),
+                            vmq_queue:force_disconnect(QueuePid, ?ADMINISTRATIVE_ACTION, DoCleanup)
+                        end,
+                        ok,
+                        QueryString1
+                    ),
+                    [clique_status:text("Done")]
+            end;
+        (_, _, _) ->
+            Text = clique_status:text(vmq_session_disconnect_usage()),
+            [clique_status:alert([Text])]
+    end,
+    clique:register_command(Cmd, KeySpecs, FlagSpecs, Callback).
+
 vmq_session_reauthorize_cmd() ->
     Cmd = ["vmq-admin", "session", "reauthorize"],
     KeySpecs = [
@@ -184,10 +320,10 @@ vmq_ql_callback(Table, DefaultFields, Opts) ->
         RowTimeout = proplists:get_value(rowtimeout, Flags, "100"),
         _ = list_to_integer(Limit),
         _ = list_to_integer(RowTimeout),
-        {Fields, Where} =
+        {Fields, WhereEqual, WhereMatch} =
             case Flags of
                 [] ->
-                    {DefaultFields, []};
+                    {DefaultFields, [], []};
                 _ ->
                     lists:foldl(
                         fun
@@ -195,12 +331,21 @@ vmq_ql_callback(Table, DefaultFields, Opts) ->
                                 Acc;
                             ({rowtimeout, _}, Acc) ->
                                 Acc;
-                            ({Flag, undefined}, {AccFields, AccWhere}) ->
-                                {[atom_to_list(Flag) | AccFields], AccWhere};
-                            ({Flag, Val}, {AccFields, AccWhere}) ->
-                                {AccFields, [{atom_to_list(Flag), v(Flag, Val)} | AccWhere]}
+                            ({Flag, undefined}, {AccFields, AccWhere, AccMatch}) ->
+                                {[atom_to_list(Flag) | AccFields], AccWhere, AccMatch};
+                            ({Flag, Val}, {AccFields, AccWhere, AccMatch}) ->
+                                case string:slice(Val, 0, 1) of
+                                    "~" ->
+                                        {AccFields, AccWhere, [
+                                            {atom_to_list(Flag), v(Flag, string:slice(Val, 1))}
+                                            | AccMatch
+                                        ]};
+                                    _ ->
+                                        {AccFields, [{atom_to_list(Flag), v(Flag, Val)} | AccWhere],
+                                            AccMatch}
+                                end
                         end,
-                        {[], []},
+                        {[], [], []},
                         Flags
                     )
             end,
@@ -212,13 +357,21 @@ vmq_ql_callback(Table, DefaultFields, Opts) ->
                     string:join(Fields, ",")
             end,
         WWhere =
-            case Where of
-                [] ->
+            case {WhereEqual, WhereMatch} of
+                {[], []} ->
                     [];
                 _ ->
                     "WHERE " ++
                         lists:flatten(
-                            string:join([[W, "=", V] || {W, V} <- Where], " AND ")
+                            string:join([[W, "=", V] || {W, V} <- WhereEqual], " AND ")
+                        ) ++
+                        case {WhereEqual, WhereMatch} of
+                            {[], _A} -> [];
+                            {_A, []} -> [];
+                            _ -> " AND "
+                        end ++
+                        lists:flatten(
+                            string:join([[W, " MATCH ", V] || {W, V} <- WhereMatch], " AND ")
                         )
             end,
         QueryString =
@@ -273,6 +426,9 @@ vmq_session_show_usage() ->
         "  Show and filter information about MQTT sessions\n\n",
         "Default options:\n"
         "  --client_id --is_online --mountpoint --peer_host --peer_port --user\n\n"
+        "Filter:\n"
+        "  You can filter for any option like --client_id=test, you can also do a regex search \n"
+        "  as in --client_id=~test.*3\n\n"
         "Options\n\n"
         "  --limit=<NumberOfResults>\n"
         "      Limit the number of results returned from each node in the cluster.\n"
@@ -292,6 +448,37 @@ vmq_session_disconnect_usage() ->
         "  --cleanup, -c\n",
         "      removes the stored cluster state of this client like stored\n",
         "      messages and subscriptions.",
+        "\n\n"
+        "  Sub-commands:\n",
+        "    clients     Forcefully disconnect multiple running sessions\n",
+        "    batch       Forcefully disconnect a number of (random) session\n",
+        "\n\n"
+    ].
+vmq_session_disconnect_clients_usage() ->
+    [
+        "vmq-admin session disconnect clients client-ids=<Comma Seperated List of ClientId>\n\n",
+        "  Forcefully disconnects a number of clients from the cluster. \n\n",
+        "  --mountpoint=<Mountpoint>, -m\n",
+        "      specifies the mountpoint, defaults to the default mountpoint\n",
+        "  --cleanup, -c\n",
+        "      removes the stored cluster state of this client like stored\n",
+        "      messages and subscriptions.",
+        "\n\n"
+    ].
+
+vmq_session_disconnect_batch_usage() ->
+    [
+        "vmq-admin session disconnect batch count=Number of clients to be disconnected\n\n",
+        "  Forcefully disconnects a number of (random) clients from the cluster. \n\n",
+        "  --mountpoint=<Mountpoint>, -m\n",
+        "      specifies the mountpoint, defaults to the default mountpoint\n",
+        "  --cleanup, -c\n",
+        "      removes the stored cluster state of this client like stored\n",
+        "      messages and subscriptions.\n",
+        "  --filter-client-ids=<list of client-ids>, -f\n"
+        "      the clients will be filtered and not disconnected from the cluster\n",
+        "  --node=<list of nodes>, -n\n"
+        "      limits disconnects to certain nodes\n",
         "\n\n"
     ].
 

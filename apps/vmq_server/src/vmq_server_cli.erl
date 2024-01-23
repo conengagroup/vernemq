@@ -56,6 +56,7 @@ register_cli() ->
     vmq_config_cli:register_config(),
     register_cli_usage(),
     vmq_server_start_cmd(),
+    vmq_server_status_cmd(),
     vmq_server_stop_cmd(),
     vmq_server_show_cmd(),
     vmq_server_metrics_cmd(),
@@ -71,6 +72,7 @@ register_cli() ->
 
     vmq_listener_cli:register_server_cli(),
     vmq_info_cli:register_cli(),
+    vmq_ssl_cli:register_cli(),
 
     vmq_tracer_cli:register_cli(),
     ok.
@@ -79,6 +81,7 @@ register_cli_usage() ->
     clique:register_usage(["vmq-admin"], fun usage/0),
     clique:register_usage(["vmq-admin", "node"], node_usage()),
     clique:register_usage(["vmq-admin", "node", "start"], start_usage()),
+    clique:register_usage(["vmq-admin", "node", "status"], status_usage()),
     clique:register_usage(["vmq-admin", "node", "stop"], stop_usage()),
     clique:register_usage(["vmq-admin", "node", "upgrade"], upgrade_usage()),
 
@@ -92,6 +95,8 @@ register_cli_usage() ->
     clique:register_usage(["vmq-admin", "api-key"], api_usage()),
     clique:register_usage(["vmq-admin", "api-key", "delete"], api_delete_key_usage()),
     clique:register_usage(["vmq-admin", "api-key", "add"], api_add_key_usage()),
+    clique:register_usage(["vmq-admin", "api-key", "create"], api_create_key_usage()),
+
     ok.
 
 vmq_server_stop_cmd() ->
@@ -108,6 +113,16 @@ vmq_server_start_cmd() ->
         _ = application:ensure_all_started(vmq_server),
         [clique_status:text("Done")]
     end,
+    clique:register_command(Cmd, [], [], Callback).
+
+vmq_server_status_cmd() ->
+    Cmd = ["vmq-admin", "node", "status"],
+    Callback = fun(_, _, _) ->
+        {ok, Status} = vmq_info:node_status(),
+        Table = [[{'Status', Key}, {'Value', Value}] || {Key, Value} <- Status],
+        [clique_status:table(Table)]
+    end,
+
     clique:register_command(Cmd, [], [], Callback).
 
 vmq_server_show_cmd() ->
@@ -479,8 +494,7 @@ vmq_cluster_join_cmd() ->
                     vmq_cluster:recheck(),
                     [clique_status:text("Done")];
                 {error, Reason} ->
-                    Text = io_lib:format("Couldn't join cluster due to ~p~n", [Reason]),
-                    [clique_status:alert([clique_status:text(Text)])]
+                    {error, {{badrpc, Reason}, Node}}
             end
     end,
     clique:register_command(Cmd, KeySpecs, FlagSpecs, Callback).
@@ -650,6 +664,12 @@ start_usage() ->
         "  when starting the service.\n"
     ].
 
+status_usage() ->
+    [
+        "vmq-admin node status\n\n",
+        "  Prints status information about the node\n"
+    ].
+
 stop_usage() ->
     [
         "vmq-admin node stop\n\n",
@@ -718,6 +738,7 @@ usage() ->
         "    metrics     Retrieve System Metrics\n",
         "    api-key     Manage API keys for the HTTP management interface\n",
         "    trace       Trace various aspects of VerneMQ\n",
+        "    tls         Manage TLS/SSL\n",
         remove_ok(vmq_plugin_mgr:get_usage_lead_lines()),
         "  Use --help after a sub-command for more details.\n"
     ].
@@ -727,6 +748,7 @@ node_usage() ->
         "vmq-admin node <sub-command>\n\n",
         "  Administrate this VerneMQ node.\n\n",
         "  Sub-commands:\n",
+        "    status      Prints status information\n",
         "    start       Start the server application\n",
         "    stop        Stop the server application\n\n",
         "  Use --help after a sub-command for more details.\n"
@@ -794,13 +816,34 @@ api_delete_key_usage() ->
 api_add_key_usage() ->
     [
         "vmq-admin api-key add key=<API Key> scope=<SCOPE> expires=<DATE>\n\n",
-        "  Adds an API Key. \n",
+        "  Adds an API Key. \n\n",
         "  Scope and expires are optional. The scope allows to set an API key for different \n"
         "  parts of VerneMQ e.g. management API (mgmt), status page (status), health endpoint \n"
         "  (health) or metrics endpoint (metrics).\n",
         "  expires allows to set an expiery date, the expected format is \"yyyy-mm-ddThh:mm:ss\" \n\n",
         "  Example: \n",
-        "  vmq-admin api-key add key=abcd scope=mgmt expires=2023-02-15T08:00:00 \n\n"
+        "     vmq-admin api-key add key=abcd scope=mgmt expires=2023-02-15T08:00:00 \n\n",
+        "  Possible scopes:\n    "
+        | [
+            string:join(vmq_auth_apikey:scopes(), ",")
+        ]
+    ].
+
+api_create_key_usage() ->
+    [
+        "vmq-admin api-key add scope=<SCOPE> expires=<DATE>\n\n",
+        "  Creates an API Key. \n\n",
+        "  Scope and expires are optional. The scope allows to set an API key for different \n"
+        "  parts of VerneMQ e.g. management API (mgmt), status page (status), health endpoint \n"
+        "  (health) or metrics endpoint (metrics).\n",
+        "  expires allows to set an expiery date, the expected format is \"yyyy-mm-ddThh:mm:ss\" \n\n",
+        "  Example: \n",
+        "      vmq-admin api-key create scope=mgmt expires=2023-02-15T08:00:00 \n\n",
+        "  Possible scopes:\n    "
+        | [
+            string:join(vmq_auth_apikey:scopes(), ","),
+            "\n\n"
+        ]
     ].
 
 ensure_all_stopped(App) ->

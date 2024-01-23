@@ -131,6 +131,18 @@
                                                                             hidden
                                                                            ]}.
 
+%% @doc Client disconnect due to keepalive is by default a warning. In unstable networks
+%% it might be "expected" behaviour to have a lot of those warnings. This allows to 
+%% downgrade the warning to an info message.
+{mapping, "logging.keepalive_as_warning", "vmq_server.logging", [
+                                                            {datatype, flag},
+                                                            {default, on}
+                                                           ]}.
+
+{translation, "vmq_server.logging",
+ fun(Conf) ->
+    [{keep_alive_as_warning, cuttlefish:conf_get("logging.keepalive_as_warning", Conf, true)}]
+ end}.
 
 %% @doc Allows to select a new default reg_view.
 %% A view is a pre-defined way to route messages. Multiple views can be
@@ -270,8 +282,8 @@
                                                                   hidden]}.
 
 %% @doc Allows a session that changes from offline to online to override the maximum
-%% online message count (max_online_messages). All offlines messages will be added 
-%% to the online queue. 
+%% online message count (max_online_messages). All offlines messages will be added
+%% to the online queue.
 {mapping, "override_max_online_messages", "vmq_server.override_max_online_messages", [{default, off},
                                                   {datatype, flag}
                                                   ]}.
@@ -352,7 +364,7 @@
 %% @doc specifies the modules to be enabled by the http(s) listeners. Overriding this setting is possible for specific listeners.
 {mapping, "http_modules", "vmq_server.http_modules", [
                                                       {default, "[vmq_metrics_http,vmq_http_mgmt_api, vmq_status_http, vmq_health_http,
-                                                                vmq_http_v2_api, vmq_http_pub]"},
+                                                                vmq_http_v2_api]"},
                                                       {datatype, string},
                                                       hidden
                                                      ]}.
@@ -380,11 +392,17 @@
 %% - listener.http.$name.http_module.$module.auth.mode
 %% - listener.https.$name.http_module.$module.auth.mode
 %%
-%% The default for vmq_http_mgmt_api is "apikey", for all others it is noauth.
+%% The default for vmq_http_mgmt_api, vmq_http_v2 and vmq_http_pub is "apikey", for all others it is noauth.
 {mapping, "http_module.$name.auth.mode", "vmq_server.http_modules_auth", [{datatype, string}, {default, "noauth"},
                                                                                hidden
                                                                                 ]}.
 {mapping, "http_module.vmq_http_mgmt_api.auth.mode", "vmq_server.http_modules_auth", [{datatype, string}, {default, "apikey"},
+                                                                               hidden
+                                                                                ]}.
+{mapping, "http_module.vmq_http_pub.auth.mode", "vmq_server.http_modules_auth", [{datatype, string}, {default, "apikey"},
+                                                                               hidden
+                                                                                ]}.
+{mapping, "http_module.vmq_http_v2_api.auth.mode", "vmq_server.http_modules_auth", [{datatype, string}, {default, "apikey"},
                                                                                hidden
                                                                                 ]}.
 {mapping, "listener.http.$name.http_module.$module.auth.mode", "vmq_server.http_listener_modules_auth", [{datatype, string},
@@ -946,6 +964,19 @@
                                                                   {datatype, string},
                                                                   hidden
                                                                  ]}.
+
+{mapping, "listener.ws.$name.proxy_xff_use_cn_as_username", "vmq_server.listeners", [
+                                                                  {default, off},
+                                                                  {datatype, flag},
+                                                                  hidden
+                                                                 ]}.
+
+{mapping, "listener.ws.$name.proxy_xff_cn_header", "vmq_server.listeners", [
+                                                                  {default, "x-ssl-client-cn"},
+                                                                  {datatype, string},
+                                                                  hidden
+                                                                 ]}.
+
 
 %% @doc If 'listener.tcp.proxy_protocol' is enabled, you may enable
 %% 'listener.tcp.proxy_protocol_use_cn_as_username' to use the CN
@@ -2216,3 +2247,10 @@
          true;
     (Name) -> vmq_schema_util:file_is_pem_content(Name)
  end}.
+
+%% @doc Disconnect v3.1 clients in case they are not authorized to publish. This breaks the MQTT 3.1 specification
+%% and is intended for old unpatchable MQTT 3.1 client devices.
+{mapping, "disconnect_on_unauthorized_publish_v3", "vmq_server.disconnect_on_unauthorized_publish_v3", [{default, off},
+                                                                                                        {datatype, flag},
+                                                                                                        hidden
+                                                                                                       ]}.
